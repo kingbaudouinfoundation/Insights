@@ -4,6 +4,7 @@ import json
 import io
 import uuid
 import time
+import urllib.parse
 
 import dash_core_components as dcc
 import dash_html_components as html
@@ -19,6 +20,8 @@ from prepare_data import prepare_data, fetch_geocodes
 from charts import list_to_string, message_box
 
 dash_resumable_upload.decorate_server(app.server, "uploads")
+
+GRANTNAV_CSV_URL = 'http://grantnav.threesixtygiving.org/search.csv?'
 
 
 layout = html.Div(id="upload-container", className='w-two-thirds-l center', children=[
@@ -85,6 +88,21 @@ layout = html.Div(id="upload-container", className='w-two-thirds-l center', chil
             ]),
             dcc.Dropdown(id='registry-list', className='black tl', options=[]),
             html.Button('Fetch file', className='mt3 f6 link dim ph3 pv2 mb2 dib white bg-near-black', id='import-registry'),
+        ]),
+        html.Div(className='w-100 tc ph3 ph5-l pv3 f3 flex items-center justify-center', children='or'),
+        html.Div(className='w-100 tc ph3 ph5-l pt3 pb4 white bg-threesixty-orange', children=[
+            html.H2(className='f3 ostrich', children=[
+                'Paste a search URL from ',
+                html.A(
+                    children='GrantNav',
+                    href='http://grantnav.threesixtygiving.org/',
+                    target='_blank',
+                    className='white underline dim'
+                    )
+            ]),
+            dcc.Input(id='grantnav-url', className='black tl black tl w-100 pa1',
+                      inputmode='url', type='url'),
+            html.Button('Fetch file', className='mt3 f6 link dim ph3 pv2 mb2 dib white bg-near-black', id='import-grantnav'),
         ]),
         # html.Div(className='w-third tc pa5 white bg-threesixty-yellow', children=[
         #     html.H2('View existing dashboards ostrich'),
@@ -202,17 +220,19 @@ def update_registry_list(_):
 # this callback checks submits the query as a new job, returning job_id to the invisible div
 @app.callback(Output('job-id', 'children'),
               [Input('upload-data', 'fileNames'),
-               Input('import-registry', 'n_clicks')],
-              [State('registry-list', 'value')])
-def update_output(fileNames, n_clicks, regid):
-    if (n_clicks is None or regid is None) and fileNames is None:
+               Input('import-registry', 'n_clicks'),
+               Input('import-grantnav', 'n_clicks')],
+              [State('registry-list', 'value'),
+               State('grantnav-url', 'value')])
+def update_output(fileNames, registry_clicks, grantnav_clicks, regid, grantnav_url):
+    if (registry_clicks is None or regid is None) and (grantnav_clicks is None or grantnav_url is None) and fileNames is None:
         return ''
     
     # a query was submitted, so queue it up and return job_id
     q = Queue(connection=get_cache())
     job_id = str(uuid.uuid4())
     try:
-        if n_clicks is not None and regid is not None:
+        if registry_clicks is not None and regid is not None:
             reg = get_registry()
             regentry = [x for x in reg if x["identifier"]==regid]
             if len(regentry)==1:
@@ -226,6 +246,122 @@ def update_output(fileNames, n_clicks, regid):
                                      timeout='15m',
                                      job_id=job_id)
                 return json.dumps({"job": job_id})
+
+        if grantnav_clicks is not None and grantnav_url is not None:
+            json_query = None
+
+            # try and extract a "json_query" argument from the URL
+            o = urllib.parse.urlparse(grantnav_url)
+            args = urllib.parse.parse_qs(o.query)
+            if 'json_query' in args:
+                json_query = json.loads(args['json_query'][0])
+
+            # otherwise just use the search term as a query
+            if json_query is None:
+                json_query = {
+                    "query": {
+                        "bool": {
+                            "filter": [
+                                {
+                                    "bool": {
+                                        "should": []
+                                    }
+                                }, {
+                                    "bool": {
+                                        "should": []
+                                    }
+                                }, {
+                                    "bool": {
+                                        "should": [], 
+                                        "must": {}
+                                    }
+                                }, {
+                                    "bool": {
+                                        "should": {
+                                            "range": {
+                                                "amountAwarded": {}
+                                            }
+                                        }, 
+                                        "must": {}
+                                    }
+                                }, {"bool": {
+                                        "should": []
+                                    }
+                                }, {
+                                    "bool": {
+                                        "should": []
+                                    }
+                                }, {
+                                    "bool": {
+                                        "should": []
+                                    }
+                                }, {
+                                    "bool": {
+                                        "should": []
+                                    }
+                                }
+                            ], 
+                            "must": {
+                                "query_string": {
+                                    "query": grantnav_url,
+                                    "default_field": "_all"
+                                }
+                            }
+                        }
+                    },
+                    "extra_context": {
+                        "amountAwardedFixed_facet_size": 3,
+                        "awardYear_facet_size": 3
+                    },
+                    "sort": {
+                        "_score": {
+                            "order": "desc"
+                        }
+                    },
+                    "aggs": {
+                        "fundingOrganization": {
+                            "terms": {
+                                "field": "fundingOrganization.id_and_name",
+                                "size": 3
+                            }
+                        },
+                        "currency": {
+                            "terms": {
+                                "field": "currency",
+                                "size": 3
+                            }
+                        },
+                        "recipientRegionName": {
+                            "terms": {
+                                "field": "recipientRegionName",
+                                "size": 3
+                            }
+                        }, 
+                        "recipientOrganization": {
+                            "terms": {
+                                "field": "recipientOrganization.id_and_name",
+                                "size": 3
+                            }
+                        },
+                        "recipientDistrictName": {
+                            "terms": {
+                                "field": "recipientDistrictName",
+                                "size": 3
+                            }
+                        }
+                    }
+                }
+
+            url = GRANTNAV_CSV_URL + urllib.parse.urlencode([(
+                'json_query', json.dumps(json_query)
+            )])
+            contents = fetch_reg_file(url)
+            filename = "grantnav.csv"
+            job = q.enqueue_call(func=parse_contents,
+                                 args=(contents, filename, None),
+                                 timeout='15m',
+                                 job_id=job_id)
+            return json.dumps({"job": job_id})
 
         if fileNames is not None:
             job = q.enqueue_call(func=parse_contents,

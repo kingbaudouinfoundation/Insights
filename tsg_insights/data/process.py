@@ -12,7 +12,7 @@ from threesixty import ThreeSixtyGiving
 
 from .cache import get_cache, get_from_cache, save_to_cache
 from .utils import get_fileid, charity_number_to_org_id
-from .registry import fetch_reg_file
+from .registry import fetch_reg_file, get_reg_file_from_url
 
 FTC_URL = 'https://findthatcharity.uk/orgid/{}.json'
 CH_URL = 'http://data.companieshouse.gov.uk/doc/company/{}.json'
@@ -51,11 +51,17 @@ def get_dataframe_from_file(filename, contents, date=None):
 def get_dataframe_from_url(url):
     # 1. Work out the file id
     headers = fetch_reg_file(url, 'HEAD')
-    # work out the version of the file
-    # https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Last-Modified
-    last_modified = headers.get("ETag", headers.get("Last-Modified"))
 
-    fileid = get_fileid(None, url, last_modified)
+    # 2. Get the registry entry for the file (if available)
+    registry = get_reg_file_from_url(url)
+    if registry.get("identifier"):
+        fileid = registry.get("identifier")
+    else:
+        # work out the version of the file
+        # https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Last-Modified
+        last_modified = headers.get("ETag", headers.get("Last-Modified"))
+
+        fileid = get_fileid(None, url, last_modified)
 
     # 2. Check cache for file
     df = get_from_cache(fileid)
@@ -71,8 +77,16 @@ def get_dataframe_from_url(url):
     data_preparation.stages = [LoadDatasetFromURL] + data_preparation.stages
     df = data_preparation.run()
 
+    # 4. Get metadata about the file
+    metadata = {
+        "headers": headers,
+        "url": url,
+    }
+    if registry:
+        metadata["registry_entry"] = registry
+
     # 5. save to cache
-    save_to_cache(fileid, df, headers=headers, url=url) # dataframe
+    save_to_cache(fileid, df, metadata=metadata)  # dataframe
 
     return (fileid, url, headers)
 
@@ -255,9 +269,19 @@ class CheckColumnsExist(CheckColumnNames):
 class CheckColumnTypes(DataPreparationStage):
 
     name = 'Check column types'
+    columns_to_check = {
+        "Amount Awarded": lambda x: x.astype(float),
+        "Funding Org:0:Identifier": lambda x: x.str.strip(),
+        "Funding Org:0:Name": lambda x: x.str.strip(),
+        "Recipient Org:0:Name": lambda x: x.str.strip(),
+        "Recipient Org:0:Identifier": lambda x: x.str.strip(),
+        "Award Date": lambda x: pd.to_datetime(x),
+    }
 
     def run(self):
-        self.df.loc[:, "Award Date"] = pd.to_datetime(self.df["Award Date"])
+        for c, func in self.columns_to_check.items():
+            if c in self.df.columns:
+                self.df.loc[:, c] = func(self.df[c])
         return self.df
 
 class AddExtraColumns(DataPreparationStage):

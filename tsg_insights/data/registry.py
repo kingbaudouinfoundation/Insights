@@ -3,7 +3,7 @@ import json
 import requests
 import pandas as pd
 
-from .cache import get_cache, save_to_cache, get_from_cache
+from .cache import get_cache
 from .utils import format_currency, get_fileid
 
 THREESIXTY_STATUS_JSON = 'https://storage.googleapis.com/datagetter-360giving-output/branch/master/status.json'
@@ -77,6 +77,13 @@ def get_reg_file(identifier):
         file_[0].get("distribution", [{}])[0].get("downloadURL"),
         file_[0].get("datagetter_metadata", {}).get("file_type")
     )
+
+def get_reg_file_from_url(url):
+    registry = get_registry()
+    for f in registry:
+        if f.get("distribution", [{}])[0].get("downloadURL")==url:
+            return f
+    return None
 
 
 def fetch_reg_file(url, method='GET'):

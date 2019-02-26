@@ -97,6 +97,10 @@ def fetch_geocodes():
     return geocodes
 
 
+class CancelledJobError(Exception):
+    pass
+
+
 class DataPreparation(object):
     
     def __init__(self, df, cache=None, job=None, **kwargs):
@@ -121,6 +125,11 @@ class DataPreparation(object):
     def _progress_job(self, stage_id, progress=None):
         if not self.job:
             return
+
+        if self.job.meta.get("cancel"):
+            print(self.job.meta)
+            raise CancelledJobError
+
         self.job.meta['progress']["stage"] = stage_id
         self.job.meta['progress']["progress"] = progress
         self.job.save_meta()
@@ -154,6 +163,11 @@ class DataPreparationStage(object):
     def _progress_job(self, item_key, total_items):
         if not self.job:
             return
+
+        if self.job.meta.get("cancel"):
+            print(self.job.meta)
+            raise CancelledJobError
+        
         self.job.meta['progress']["progress"] = (item_key, total_items)
         self.job.save_meta()
 

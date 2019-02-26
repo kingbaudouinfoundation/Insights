@@ -47,7 +47,8 @@ const track_job = function(jobid){
     var progressLoader = document.getElementById("upload-progress-loader");
     progressLoader.style.display = 'flex';
     var resultsButton = document.getElementById("upload-progress-results");
-    resultsButton.innerText = 'View results';
+    const cancelFetchText = 'Cancel fetching file';
+    resultsButton.innerText = cancelFetchText;
     resultsButton.href = '#';
     resultsButton.classList.add("invalid");
 
@@ -66,6 +67,26 @@ const track_job = function(jobid){
     subProgress.style.display = "none";
     subProgressBar.value = 0;
     subProgressBar.max = 10;
+
+    console.log("HELLO");
+
+    // what happens when cancel button is pressed
+    resultsButton.addEventListener('click', (event)=>{
+        if (resultsButton.innerText != cancelFetchText){
+            return true;
+        }
+        event.preventDefault();
+        fetch(`/job/${jobid}/cancel`)
+            .then(function (response) {
+                return response.json();
+            })
+            .then(function (jobStatus) {
+                console.log("Job cancelled");
+                console.log(jobStatus);
+            });
+    });
+
+    console.log("wOORLD");
 
     // refresh the job ID every X seconds to get the current status
     const intervalID = setInterval(() => {
@@ -115,6 +136,7 @@ const track_job = function(jobid){
                             progressLoader.style.display = 'flex';
                             break;
                         }
+                        resultsButton.classList.remove("invalid");
 
                         /**
                          * jobStatus.stages has a description of the different stages

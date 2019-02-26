@@ -1,6 +1,7 @@
-from rq import Queue
+# from rq import Queue
 
 from .cache import get_cache
+from ..commands.worker import QueueWithKill as Queue
 
 def get_queue_job(job_id):
     if not isinstance(job_id, str):
@@ -11,7 +12,10 @@ def get_queue_job(job_id):
     if failed_job:
         return failed_job
     return q.fetch_job(job_id)
+from .cache import get_cache
 
+def cancel_queue_job(job):
+    job.kill()
 
 def get_all_jobs():
     # NB doesn't seem to work at the moment @TODO

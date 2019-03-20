@@ -1,0 +1,23 @@
+autopep8==1.4.3
+Babel==2.6.0
+dash==0.36.0
+dash-core-components==0.43.0
+dash-dangerously-set-inner-html==0.0.2
+dash-html-components==0.13.5
+dash-renderer==0.17.0
+dash-resumable-upload==0.0.3
+gunicorn==19.9.0
+humanize==0.5.1
+inflect==0.3.1
+pandas==0.23.3
+pytest==4.2.1
+python-dotenv==0.10.1
+requests-cache==0.4.13
+requests-mock==1.5.2
+rq==0.12.0 # for linux
+-e git+https://github.com/Miketsukami/rq-win.git@2040c4c86237108173fd018af530f167fb00345e#egg=rq_win # for windows
+-e git+https://github.com/drkane/threesixty-parser.git@1cd121e3b917b0bc18c6751e958bbdf4eb9f757e#egg=threesixtygiving
+times==0.7 # for linux
+tqdm==4.23.4
+xlrd==1.1.0
+XlsxWriter==1.1.2

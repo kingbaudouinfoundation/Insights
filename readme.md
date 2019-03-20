@@ -1,6 +1,8 @@
 ## Install Dash
 This repo uses Dash. See [Dash installation documentation](https://dash.plot.ly/installation)
 
+## Instal redis
+To install redis on windows, see https://github.com/MicrosoftArchive/redis/releases
 
 ## Run development version
 

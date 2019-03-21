@@ -14,7 +14,7 @@ pytest==4.2.1
 python-dotenv==0.10.1
 requests-cache==0.4.13
 requests-mock==1.5.2
-rq==0.12.0 # for linux
+rq==0.12.0 # rq-win won't work with more recent version of rq
 -e git+https://github.com/Miketsukami/rq-win.git@2040c4c86237108173fd018af530f167fb00345e#egg=rq_win # for windows
 -e git+https://github.com/drkane/threesixty-parser.git@1cd121e3b917b0bc18c6751e958bbdf4eb9f757e#egg=threesixtygiving
 times==0.7 # for linux

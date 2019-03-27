@@ -5,6 +5,9 @@ import os
 import logging
 import datetime
 
+import sqlite3
+from sqlite3 import Error
+
 import pandas as pd
 import requests
 from rq import get_current_job
@@ -21,7 +24,9 @@ PC_URL = 'https://postcodes.findthatcharity.uk/postcodes/{}.json'
 
 # config
 # schemes with data on findthatcharity
+BELGIAN_SCHEMES = ['BE-BCE_KBO']
 FTC_SCHEMES = ["GB-CHC", "GB-NIC", "GB-SC", "GB-COH"]
+KNOWN_SCHEMES = FTC_SCHEMES + BELGIAN_SCHEMES
 POSTCODE_FIELDS = ['ctry', 'cty', 'laua', 'pcon', 'rgn', 'imd', 'ru11ind',
                    'oac11', 'lat', 'long']  # fields to care about from the postcodes)
 
@@ -129,6 +134,7 @@ class DataPreparation(object):
             CleanRecipientIdentifiers,
             LookupCharityDetails,
             LookupCompanyDetails,
+            LookupBelgianDetails,
             MergeCompanyAndCharityDetails,
             FetchPostcodes,
             MergeGeoData,
@@ -189,6 +195,7 @@ class LoadDatasetFromURL(DataPreparationStage):
     name = 'Load data to be prepared from an URL'
 
     def run(self):
+
         if not self.attributes.get("url"):
             return self.df
 
@@ -202,6 +209,7 @@ class LoadDatasetFromFile(DataPreparationStage):
     name = 'Load data to be prepared from a file'
 
     def run(self):
+
         if not self.attributes.get("contents") or not self.attributes.get("filename"):
             return self.df
 
@@ -295,10 +303,10 @@ class CleanRecipientIdentifiers(DataPreparationStage):
     def run(self):
         # default is use existing identifier
         self.df.loc[
-            self.df["Recipient Org:0:Identifier:Scheme"].isin(FTC_SCHEMES),
+            self.df["Recipient Org:0:Identifier:Scheme"].isin(KNOWN_SCHEMES),
             "Recipient Org:0:Identifier:Clean"
         ] = self.df.loc[
-            self.df["Recipient Org:0:Identifier:Scheme"].isin(FTC_SCHEMES),
+            self.df["Recipient Org:0:Identifier:Scheme"].isin(KNOWN_SCHEMES),
             "Recipient Org:0:Identifier"
         ]
 
@@ -337,7 +345,8 @@ class LookupCharityDetails(DataPreparationStage):
             return json.loads(self.cache.hget("charity", orgid))
         return requests.get(self.ftc_url.format(orgid)).json()
 
-    def run(self):    
+    def run(self):
+
         orgids = self.df.loc[
             self.df["Recipient Org:0:Identifier:Scheme"].isin(FTC_SCHEMES),
             "Recipient Org:0:Identifier:Clean"
@@ -382,6 +391,49 @@ class LookupCompanyDetails(DataPreparationStage):
 
         return self.df
 
+class LookupBelgianDetails(DataPreparationStage):
+
+    name = 'Look up Belgian company data'
+    cache_name = 'be_company'
+
+    def _get_company(self, orgid):
+        if self.cache.hexists(self.cache_name, orgid):
+            return json.loads(self.cache.hget(self.cache_name, orgid))
+        else:
+            db_orgid = orgid.replace("BE-BCE_KBO-", "")
+            db_orgid = db_orgid[:4]+'.'+db_orgid[4:7]+'.'+db_orgid[7:]
+            
+            try: 
+                conn_sql3 = sqlite3.connect('kbo.sqlite3')
+                sql3 = conn_sql3.cursor() 
+                result = sql3.execute('SELECT * FROM flatten WHERE EntityNumber=?', (db_orgid,)).fetchone()
+                conn_sql3.close()
+
+                db_fields = ['EntityNumber', 'Status',  'JuridicalSituation', 'TypeOfEnterprise', 'JuridicalForm', 
+                    'StartDate', 'TypeOfAddress', 'Zipcode', 'MunicipalityNL', 'MunicipalityFR', 'StreetNL', 'StreetFR', 'HouseNumber', 
+                    'Box', 'municipality_nis_code', 'Denomination', 'OtherDenomination', 'assets', 'operatingIncome', 
+                    'operatingCharges', 'averageFTE', 'averageFTEMen', 'averageFTEWomen']
+                
+                result = dict(zip(db_fields, list(result)[1:]))
+            except TypeError:
+                print('Could not find company {}'.format(db_orgid))
+            return result
+
+    def run(self):
+        company_orgids = self.df.loc[
+            self.df["Recipient Org:0:Identifier:Scheme"].isin(BELGIAN_SCHEMES),
+            "Recipient Org:0:Identifier:Clean"
+        ].unique()
+        print("Finding details for {} belgian companies".format(len(company_orgids)))
+        for k, orgid in tqdm.tqdm(enumerate(company_orgids)):
+            self._progress_job(k+1, len(company_orgids))
+            try:
+                self.cache.hset(self.cache_name, orgid, json.dumps(self._get_company(orgid)))
+            except ValueError:
+                pass
+
+        return self.df
+
 
 class MergeCompanyAndCharityDetails(DataPreparationStage):
 
@@ -417,6 +469,9 @@ class MergeCompanyAndCharityDetails(DataPreparationStage):
                     "latest_income": c.get("latest_income"),
                     "org_type": self._get_org_type(c.get("id")),
                 })
+
+        if not charity_rows:
+            return None
 
         orgid_df = pd.DataFrame(charity_rows).set_index("orgid")
 
@@ -460,17 +515,59 @@ class MergeCompanyAndCharityDetails(DataPreparationStage):
             companies_df.loc[:, "date_removed"], dayfirst=True)
 
         return companies_df
+    
+    def _create_kbo_bce_df(self):
+
+        org_type = {'17': 'ASBL/VZW', '28': 'ISBL/IZW', '117': 'ASBL de droit public / VZW van publiek recht', 
+            '125': 'AISBL/IVZW', '325': 'AISBL de droit public / IVZW van publiek recht', '26': 'Fondation privée / Private stichting', '29': 'Fondation d\'utilité publique / Stichting van openbaar nut'}
+        
+        orgids = self.df["Recipient Org:0:Identifier:Clean"].unique()
+        rows = []
+        for k, c in self.cache.hscan_iter("be_company"):
+            c = json.loads(c)
+            if c is None:
+                print('No info on {}'.format(k.decode("utf8")))
+            else:
+                if k.decode("utf8") in orgids:
+                    rows.append({
+                        "orgid": k.decode("utf8"),
+                        "charity_number": None,
+                        "company_number": None,
+                        "date_registered": c.get("StartDate"),
+                        "date_removed": None,
+                        "postcode": c.get("Zipcode"),
+                        "latest_income": c.get("operatingIncome"),
+                        "org_type": 'Belgian ' + org_type[str(int(c.get("JuridicalForm")))], # juridical form is stored as real in the db. Should change it, but in the meantime this is a quick fix
+                    })
+
+        if not rows:
+            return None
+
+        orgid_df = pd.DataFrame(rows).set_index("orgid")
+
+        orgid_df.loc[:, "date_registered"] = pd.to_datetime(
+            orgid_df.loc[:, "date_registered"])
+        orgid_df.loc[:, "date_removed"] = pd.to_datetime(
+            orgid_df.loc[:, "date_removed"])
+
+        return orgid_df
 
     def run(self):
 
         # create orgid dataframes
         orgid_df = self._create_orgid_df()
         companies_df = self._create_company_df()
+        kbo_bce_df = self._create_kbo_bce_df()
 
         if isinstance(orgid_df, pd.DataFrame) and isinstance(companies_df, pd.DataFrame):
             orgid_df = pd.concat([orgid_df, companies_df], sort=False)
         elif isinstance(companies_df, pd.DataFrame):
             orgid_df = companies_df
+        
+        if isinstance(orgid_df, pd.DataFrame) and isinstance(kbo_bce_df, pd.DataFrame):
+            orgid_df = pd.concat([orgid_df, kbo_bce_df], sort=False)
+        elif isinstance(kbo_bce_df, pd.DataFrame):
+            orgid_df = kbo_bce_df
         
         if not isinstance(orgid_df, pd.DataFrame):
             return self.df
@@ -543,6 +640,10 @@ class MergeGeoData(DataPreparationStage):
                     **{"postcode": k.decode("utf8")},
                     **{j: c.get("data", {}).get("attributes", {}).get(j) for j in self.POSTCODE_FIELDS}
                 })
+        
+        if not postcode_rows:
+            return None
+
         postcode_df = pd.DataFrame(postcode_rows).set_index(
             "postcode")[self.POSTCODE_FIELDS]
 
@@ -566,7 +667,8 @@ class MergeGeoData(DataPreparationStage):
 
     def run(self):
         postcode_df = self._create_postcode_df()
-        self.df = self.df.join(postcode_df.rename(columns=lambda x: "__geo_" + x),
+        if postcode_df is not None:
+            self.df = self.df.join(postcode_df.rename(columns=lambda x: "__geo_" + x),
                         on="Recipient Org:0:Postal Code", how="left")
         return self.df
 

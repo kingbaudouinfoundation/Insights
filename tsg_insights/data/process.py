@@ -406,15 +406,18 @@ class LookupBelgianDetails(DataPreparationStage):
             try: 
                 conn_sql3 = sqlite3.connect('kbo.sqlite3')
                 sql3 = conn_sql3.cursor() 
-                result = sql3.execute('SELECT * FROM flatten WHERE EntityNumber=?', (db_orgid,)).fetchone()
+                result = sql3.execute('SELECT * FROM enterprise WHERE EnterpriseNumber=?', (db_orgid,)).fetchone()
                 conn_sql3.close()
-
+                
+                '''
                 db_fields = ['EntityNumber', 'Status',  'JuridicalSituation', 'TypeOfEnterprise', 'JuridicalForm', 
                     'StartDate', 'TypeOfAddress', 'Zipcode', 'MunicipalityNL', 'MunicipalityFR', 'StreetNL', 'StreetFR', 'HouseNumber', 
                     'Box', 'municipality_nis_code', 'Denomination', 'OtherDenomination', 'assets', 'operatingIncome', 
-                    'operatingCharges', 'averageFTE', 'averageFTEMen', 'averageFTEWomen']
+                    'operatingCharges', 'averageFTE', 'averageFTEMen', 'averageFTEWomen']'''
+                db_fields = ['EnterpriseNumber', 'Status',  'JuridicalSituation', 'TypeOfEnterprise', 'JuridicalForm', 
+                    'StartDate']
                 
-                result = dict(zip(db_fields, list(result)[1:]))
+                result = dict(zip(db_fields, list(result)))
             except TypeError:
                 print('Could not find company {}'.format(db_orgid))
             return result
@@ -451,6 +454,18 @@ class MergeCompanyAndCharityDetails(DataPreparationStage):
         elif id.startswith("N") or id.startswith("GB-NIC-"):
             return "Registered Charity (NI)"
         return "Registered Charity (E&W)"
+    
+    def _belgian_org_type(self, code):
+        org_type = {'017': 'ASBL/VZW', '028': 'ISBL/IZW', '117': 'ASBL de droit public / VZW van publiek recht', 
+            '125': 'AISBL/IVZW', '325': 'AISBL de droit public / IVZW van publiek recht', 
+            '026': 'Fondation privée / Private stichting', '029': 'Fondation d\'utilité publique / Stichting van openbaar nut',
+            '411': 'Ville / commune / Stad / gemeente', '412': 'Centre public d\'action sociale / Openbaar centrum voor maatschappelijk welzijn'
+        }
+        if code in org_type:
+            return 'Belgian ' + org_type[code]
+        else:
+            print('not found: {}'.format(code))
+            return 'Other form of organisation'
 
     def _create_orgid_df(self):
 
@@ -518,9 +533,6 @@ class MergeCompanyAndCharityDetails(DataPreparationStage):
     
     def _create_kbo_bce_df(self):
 
-        org_type = {'17': 'ASBL/VZW', '28': 'ISBL/IZW', '117': 'ASBL de droit public / VZW van publiek recht', 
-            '125': 'AISBL/IVZW', '325': 'AISBL de droit public / IVZW van publiek recht', '26': 'Fondation privée / Private stichting', '29': 'Fondation d\'utilité publique / Stichting van openbaar nut'}
-        
         orgids = self.df["Recipient Org:0:Identifier:Clean"].unique()
         rows = []
         for k, c in self.cache.hscan_iter("be_company"):
@@ -535,9 +547,9 @@ class MergeCompanyAndCharityDetails(DataPreparationStage):
                         "company_number": None,
                         "date_registered": c.get("StartDate"),
                         "date_removed": None,
-                        "postcode": c.get("Zipcode"),
-                        "latest_income": c.get("operatingIncome"),
-                        "org_type": 'Belgian ' + org_type[str(int(c.get("JuridicalForm")))], # juridical form is stored as real in the db. Should change it, but in the meantime this is a quick fix
+                        "postcode": None, #c.get("Zipcode"),
+                        "latest_income": None, #c.get("operatingIncome"),
+                        "org_type": self._belgian_org_type(c.get("JuridicalForm")),
                     })
 
         if not rows:
@@ -605,7 +617,7 @@ class FetchPostcodes(DataPreparationStage):
             self.df.loc[:, "Recipient Org:0:Postal Code"] = None
 
         # fetch postcode data
-        postcodes = self.df.loc[:, "Recipient Org:0:Postal Code"].dropna().unique()
+        postcodes = self.df.loc[~self.df['Recipient Org:0:Identifier:Scheme'].isin(BELGIAN_SCHEMES), "Recipient Org:0:Postal Code"].dropna().unique()
         print("Finding details for {} postcodes".format(len(postcodes)))
         for k, pc in tqdm.tqdm(enumerate(postcodes)):
             self._progress_job(k+1, len(postcodes))

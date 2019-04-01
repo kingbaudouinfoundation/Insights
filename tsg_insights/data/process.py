@@ -594,6 +594,10 @@ class MergeCompanyAndCharityDetails(DataPreparationStage):
         # merge org details into main dataframe
         self.df = self.df.join(orgid_df.rename(columns=lambda x: "__org_" + x),
                      on="Recipient Org:0:Identifier:Clean", how="left")
+        
+        # Add type 'individual'
+        self.df.loc[self.df['recipientOrganization.0.Type'] == 'IND', '__org_org_type'] = 'Individuals'
+
         return self.df
 
 class FetchPostcodes(DataPreparationStage):

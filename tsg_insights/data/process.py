@@ -27,7 +27,7 @@ PC_URL = 'https://postcodes.findthatcharity.uk/postcodes/{}.json'
 BELGIAN_SCHEMES = ['BE-BCE_KBO']
 FTC_SCHEMES = ["GB-CHC", "GB-NIC", "GB-SC", "GB-COH"]
 KNOWN_SCHEMES = FTC_SCHEMES + BELGIAN_SCHEMES
-POSTCODE_FIELDS = ['ctry', 'cty', 'laua', 'pcon', 'rgn', 'imd', 'ru11ind',
+UK_POSTCODE_FIELDS = ['ctry', 'cty', 'laua', 'pcon', 'rgn', 'imd', 'ru11ind',
                    'oac11', 'lat', 'long']  # fields to care about from the postcodes)
 
 
@@ -115,7 +115,7 @@ def prepare_lookup_cache(cache=None):
 
 def fetch_geocodes():
     r = requests.get("https://postcodes.findthatcharity.uk/areas/names.csv",
-                     params={"types": ",".join(POSTCODE_FIELDS)})
+                     params={"types": ",".join(UK_POSTCODE_FIELDS)})
     pc_names = pd.read_csv(io.StringIO(r.text)).set_index(
         ["type", "code"]).sort_index()
     geocodes = pc_names["name"].to_dict()
@@ -606,10 +606,26 @@ class FetchPostcodes(DataPreparationStage):
     pc_url = PC_URL
 
     def _get_postcode(self, pc):
-        if self.cache.hexists("postcode", pc):
-            return json.loads(self.cache.hget("postcode", pc))
+        hkey = pc['Recipient Org:0:Country'] + ' - ' + pc["Recipient Org:0:Postal Code"]
+        if self.cache.hexists("postcode", hkey):
+            return json.loads(self.cache.hget("postcode", hkey))
         # @TODO: postcode cleaning and formatting
-        return requests.get(self.pc_url.format(pc)).json()
+        else:
+            if pc['Recipient Org:0:Country'] == 'UNITED KINGDOM':
+                return requests.get(self.pc_url.format(pc)).json()
+            elif pc['Recipient Org:0:Country'] == 'BELGIUM':
+
+                try: 
+                    conn_sql3 = sqlite3.connect('kbo.sqlite3')
+                    sql3 = conn_sql3.cursor() 
+                    result = sql3.execute('SELECT postcode, city, long, lat, province FROM postcode_geo WHERE postcode=?', (pc['Recipient Org:0:Postal Code'],)).fetchone()
+                    conn_sql3.close()
+                    db_fields = ['postcode',  'city', 'long', 'lat', 'province']
+                    
+                    return dict(zip(db_fields, list(result)))
+                except:
+                    print('postcode not found', pc['Recipient Org:0:Postal Code'])
+                    return None
 
     def run(self):
         # check for recipient org postcode field first
@@ -621,12 +637,12 @@ class FetchPostcodes(DataPreparationStage):
             self.df.loc[:, "Recipient Org:0:Postal Code"] = None
 
         # fetch postcode data
-        postcodes = self.df.loc[~self.df['Recipient Org:0:Identifier:Scheme'].isin(BELGIAN_SCHEMES), "Recipient Org:0:Postal Code"].dropna().unique()
+        postcodes = self.df.loc[:, ['Recipient Org:0:Country', "Recipient Org:0:Postal Code"]].dropna().drop_duplicates()
         print("Finding details for {} postcodes".format(len(postcodes)))
-        for k, pc in tqdm.tqdm(enumerate(postcodes)):
+        for k, pc in tqdm.tqdm(postcodes.iterrows()):
             self._progress_job(k+1, len(postcodes))
             try:
-                self.cache.hset("postcode", pc, json.dumps(self._get_postcode(pc)))
+                self.cache.hset("postcode", pc['Recipient Org:0:Country'] + ' - ' + pc["Recipient Org:0:Postal Code"], json.dumps(self._get_postcode(pc)))
             except json.JSONDecodeError:
                 continue
 
@@ -635,7 +651,7 @@ class FetchPostcodes(DataPreparationStage):
 class MergeGeoData(DataPreparationStage):
 
     name = 'Add geo data'
-    POSTCODE_FIELDS = POSTCODE_FIELDS
+    UK_POSTCODE_FIELDS = UK_POSTCODE_FIELDS
 
     def _convert_geocode(self, areatype, geocode_code):
         geocode_name = self.cache.hget(
@@ -646,46 +662,50 @@ class MergeGeoData(DataPreparationStage):
             return geocode_name.decode("utf8")
         return geocode_name
 
+    def _belgian_pc(self, k, c):
+        return {
+            'Recipient Org:0:hkey pc': k.decode("utf8"),
+            'ctry': 'Belgium', 
+            'rgn': c.get('province'), 
+            'lng': c.get('long'), 
+            'lat': c.get('lat')
+        }
+
+    def _uk_pc(self, k, c):
+        return {
+            'Recipient Org:0:hkey pc': k.decode("utf8"),
+            'ctry': c.get('ctry'), 
+            'rgn': c.get('rgn'), 
+            'lng': c.get('lng'), 
+            'lat': c.get('lat')
+        }
+
     def _create_postcode_df(self):
-        postcodes = self.df["Recipient Org:0:Postal Code"].unique()
+        postcodes = self.df["Recipient Org:0:hkey pc"].unique()
         postcode_rows = []
         for k, c in self.cache.hscan_iter("postcode"):
             c = json.loads(c)
             if k.decode("utf8") in postcodes:
-                postcode_rows.append({
-                    **{"postcode": k.decode("utf8")},
-                    **{j: c.get("data", {}).get("attributes", {}).get(j) for j in self.POSTCODE_FIELDS}
-                })
+                try:
+                    if k.decode("utf8").startswith('BELGIUM'):
+                        postcode_rows.append(self._belgian_pc(k, c))
+                    elif k.decode("utf8").startswith('UNITED KINGDOM'):
+                        postcode_rows.append(self._uk_pc(k, c))
+                except:
+                    print('Broken record for ', k.decode("utf8"))
         
         if not postcode_rows:
             return None
 
-        postcode_df = pd.DataFrame(postcode_rows).set_index(
-            "postcode")[self.POSTCODE_FIELDS]
-
-        # swap out names for codes
-        for c in postcode_df.columns:
-            postcode_df.loc[:, c] = postcode_df[c].apply(
-                lambda x: self._convert_geocode(c, str(x))
-            ).fillna(postcode_df[c])
-            if postcode_df[c].dtype == 'object':
-                postcode_df.loc[:, c] = postcode_df[c].str.replace(r"\(pseudo\)", "")
-                postcode_df.loc[
-                    postcode_df[c].fillna("")=="N99999999",
-                    c
-                ] = "Northern Ireland"
-                postcode_df.loc[
-                    postcode_df[c].fillna("").str.endswith("99999999"),
-                    c
-                ] = None
-
+        postcode_df = pd.DataFrame(postcode_rows).set_index('Recipient Org:0:hkey pc')
         return postcode_df
 
     def run(self):
+        self.df['Recipient Org:0:hkey pc'] = self.df['Recipient Org:0:Country'] + ' - ' + self.df["Recipient Org:0:Postal Code"]
         postcode_df = self._create_postcode_df()
         if postcode_df is not None:
             self.df = self.df.join(postcode_df.rename(columns=lambda x: "__geo_" + x),
-                        on="Recipient Org:0:Postal Code", how="left")
+                        on="Recipient Org:0:hkey pc", how="left")
         return self.df
 
 class AddExtraFieldsExternal(DataPreparationStage):

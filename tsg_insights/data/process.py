@@ -56,7 +56,6 @@ def get_dataframe_from_file(filename, contents, date=None, expire_days=(2 * (365
 
     # 5. save to cache
     save_to_cache(fileid, df, metadata=metadata)  # dataframe
-
     return (fileid, filename)
 
 def get_dataframe_from_url(url):
@@ -596,7 +595,8 @@ class MergeCompanyAndCharityDetails(DataPreparationStage):
                      on="Recipient Org:0:Identifier:Clean", how="left")
         
         # Add type 'individual'
-        self.df.loc[self.df['recipientOrganization.0.Type'] == 'IND', '__org_org_type'] = 'Individuals'
+        if 'recipientOrganization.0.Type' in self.df.columns:
+            self.df.loc[self.df['recipientOrganization.0.Type'] == 'IND', '__org_org_type'] = 'Individuals'
 
         return self.df
 
@@ -605,15 +605,36 @@ class FetchPostcodes(DataPreparationStage):
     name = 'Look up postcode data'
     pc_url = PC_URL
 
+    def _normalise_country_name(self):
+        conn_sql3 = sqlite3.connect('kbo.sqlite3')
+        sql3 = conn_sql3.cursor()
+        country_dict = {}
+        for row in sql3.execute('SELECT CountryName, ISO2, ISO3 FROM country_code'):
+            country_dict[row[0].lower()] = row[1].lower()
+            country_dict[row[2].lower()] = row[1].lower()
+        conn_sql3.close()
+
+        # Add rules for uk
+        country_dict['uk'] = 'gb'
+        country_dict['england'] = 'gb'
+        country_dict['wales'] = 'gb'
+        country_dict['scotland'] = 'gb'
+        country_dict['northern ireland'] = 'gb'
+
+        if 'Recipient Org:0:Country' in self.df.columns:
+            self.df['Recipient Org:0:Country'] = self.df['Recipient Org:0:Country'].apply(lambda x : country_dict[x.lower()] if x.lower() in country_dict else x.lower())
+        else:
+            self.df['Recipient Org:0:Country'] = 'gb'
+
     def _get_postcode(self, pc):
-        hkey = pc['Recipient Org:0:Country'] + ' - ' + pc["Recipient Org:0:Postal Code"]
+        hkey = pc['Recipient Org:0:hkey pc']
         if self.cache.hexists("postcode", hkey):
             return json.loads(self.cache.hget("postcode", hkey))
         # @TODO: postcode cleaning and formatting
         else:
-            if pc['Recipient Org:0:Country'] == 'UNITED KINGDOM':
-                return requests.get(self.pc_url.format(pc)).json()
-            elif pc['Recipient Org:0:Country'] == 'BELGIUM':
+            if pc['Recipient Org:0:Country'] == 'gb':
+                return requests.get(self.pc_url.format(pc['Recipient Org:0:Postal Code'])).json()
+            elif pc['Recipient Org:0:Country'] == 'be':
 
                 try: 
                     conn_sql3 = sqlite3.connect('kbo.sqlite3')
@@ -637,12 +658,14 @@ class FetchPostcodes(DataPreparationStage):
             self.df.loc[:, "Recipient Org:0:Postal Code"] = None
 
         # fetch postcode data
-        postcodes = self.df.loc[:, ['Recipient Org:0:Country', "Recipient Org:0:Postal Code"]].dropna().drop_duplicates()
+        self._normalise_country_name()
+        self.df['Recipient Org:0:hkey pc'] = self.df['Recipient Org:0:Country'] + ' - ' + self.df["Recipient Org:0:Postal Code"]
+        postcodes = self.df.loc[:, ['Recipient Org:0:hkey pc', 'Recipient Org:0:Country', "Recipient Org:0:Postal Code"]].dropna().drop_duplicates()
         print("Finding details for {} postcodes".format(len(postcodes)))
         for k, pc in tqdm.tqdm(postcodes.iterrows()):
             self._progress_job(k+1, len(postcodes))
             try:
-                self.cache.hset("postcode", pc['Recipient Org:0:Country'] + ' - ' + pc["Recipient Org:0:Postal Code"], json.dumps(self._get_postcode(pc)))
+                self.cache.hset("postcode", pc['Recipient Org:0:hkey pc'], json.dumps(self._get_postcode(pc)))
             except json.JSONDecodeError:
                 continue
 
@@ -667,17 +690,17 @@ class MergeGeoData(DataPreparationStage):
             'Recipient Org:0:hkey pc': k.decode("utf8"),
             'ctry': 'Belgium', 
             'rgn': c.get('province'), 
-            'lng': c.get('long'), 
+            'long': c.get('long'), 
             'lat': c.get('lat')
         }
 
     def _uk_pc(self, k, c):
         return {
             'Recipient Org:0:hkey pc': k.decode("utf8"),
-            'ctry': c.get('ctry'), 
-            'rgn': c.get('rgn'), 
-            'lng': c.get('lng'), 
-            'lat': c.get('lat')
+            'ctry': self.cache.hget('geocodes', 'ctry-'+c.get("data", {}).get("attributes", {}).get('ctry')).decode("utf8"), 
+            'rgn': self.cache.hget('geocodes', 'rgn-'+c.get("data", {}).get("attributes", {}).get('rgn')).decode("utf8").replace('(pseudo) ', ''), 
+            'long': c.get("data", {}).get("attributes", {}).get('long'), 
+            'lat': c.get("data", {}).get("attributes", {}).get('lat')
         }
 
     def _create_postcode_df(self):
@@ -687,9 +710,9 @@ class MergeGeoData(DataPreparationStage):
             c = json.loads(c)
             if k.decode("utf8") in postcodes:
                 try:
-                    if k.decode("utf8").startswith('BELGIUM'):
+                    if k.decode("utf8").startswith('be'):
                         postcode_rows.append(self._belgian_pc(k, c))
-                    elif k.decode("utf8").startswith('UNITED KINGDOM'):
+                    elif k.decode("utf8").startswith('gb'):
                         postcode_rows.append(self._uk_pc(k, c))
                 except:
                     print('Broken record for ', k.decode("utf8"))
@@ -701,7 +724,7 @@ class MergeGeoData(DataPreparationStage):
         return postcode_df
 
     def run(self):
-        self.df['Recipient Org:0:hkey pc'] = self.df['Recipient Org:0:Country'] + ' - ' + self.df["Recipient Org:0:Postal Code"]
+        
         postcode_df = self._create_postcode_df()
         if postcode_df is not None:
             self.df = self.df.join(postcode_df.rename(columns=lambda x: "__geo_" + x),

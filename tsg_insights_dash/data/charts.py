@@ -5,6 +5,7 @@ import dash_core_components as dcc
 import dash_html_components as html
 import plotly.graph_objs as go
 import pandas as pd
+import math
 
 from tsg_insights.data.utils import list_to_string, pluralize, get_unique_list, format_currency
 from .results import CHARTS
@@ -545,9 +546,10 @@ def location_map(df, mapbox_access_token=None, mapbox_style=None):
     if "__geo_lat" not in df.columns or "__geo_long" not in df.columns:
         return
 
-    popup_col = 'Recipient Org:0:Name'
-    if popup_col not in df.columns and 'Recipient Org:0:Identifier' in df.columns:
-        popup_col = 'Recipient Org:0:Identifier'
+    #popup_col = 'Recipient Org:0:Name'
+    #if popup_col not in df.columns and 'Recipient Org:0:Identifier' in df.columns:
+    #    popup_col = 'Recipient Org:0:Identifier'
+    popup_col = 'Recipient Org:0:hkey pc'
 
     try:
         geo = df[["__geo_lat", "__geo_long", popup_col]].dropna()
@@ -576,15 +578,16 @@ def location_map(df, mapbox_access_token=None, mapbox_style=None):
             lon=geo["__geo_long"].values,
             mode='markers',
             marker=dict(
-                size=9,
+                size=[math.sqrt(s*10) for s in geo['grants'].values],
                 color=THREESIXTY_COLOURS[0]
             ),
             text=geo.apply(
-                lambda row: "{} ({} grants)".format(row[popup_col], row['grants']) if row["grants"] > 1 else row[popup_col],
+                lambda row: "{} ({} grants)".format(row[popup_col], row['grants']) if row["grants"] > 1 else row[popup_col] + ' (1 grant)',
                 axis=1
             ).values,
         )
     ]
+    print(data)
 
     layout = go.Layout(
         autosize=True,
@@ -594,11 +597,11 @@ def location_map(df, mapbox_access_token=None, mapbox_style=None):
             accesstoken=mapbox_access_token,
             bearing=0,
             center=dict(
-                lat=54.093409,
-                lon=-2.89479
+                lat=50.649,
+                lon=4.64
             ),
             pitch=0,
-            zoom=5,
+            zoom=7,
             style=mapbox_style
         ),
         margin=go.layout.Margin(

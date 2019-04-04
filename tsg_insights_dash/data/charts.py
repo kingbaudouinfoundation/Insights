@@ -557,7 +557,7 @@ def location_map(df, mapbox_access_token=None, mapbox_style=None):
         geo = geo.groupby(["__geo_lat", "__geo_long", popup_col]).size().rename("grants").reset_index()
     except KeyError as e:
         return message_box(
-            'Location of UK grant recipients',
+            'Location of grant recipients',
             [
                 '''An error occured when attempting to show the map. Error: ''',
                 html.Pre(str(e))
@@ -567,7 +567,7 @@ def location_map(df, mapbox_access_token=None, mapbox_style=None):
 
     if len(geo) == 0:
         return message_box(
-            'Location of UK grant recipients',
+            'Location of grant recipients',
             '''Map cannot be shown. No location data is available.''',
             error=True
         )
@@ -619,12 +619,10 @@ def location_map(df, mapbox_access_token=None, mapbox_style=None):
             figure={"data": data, "layout": layout},
             config=DEFAULT_CONFIG
         ),
-        'Location of UK grant recipients',
+        'Location of grant recipients',
         description='''Showing the location of **{:,.0f}** grants out of {:,.0f}
         
-This map is based on postcodes found in the grants data.
-If postcodes aren’t present, they are sourced from UK
-charity or company registers. Mapping is UK only.'''.format(
+This map is based on postcodes found in the grants data.'''.format(
             grant_count, len(df)
         ),
         children=[chart_n(geo["grants"].sum(), 'grant')],

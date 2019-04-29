@@ -4,6 +4,7 @@ import io
 import os
 import logging
 import datetime
+import re
 
 import sqlite3
 from sqlite3 import Error
@@ -59,8 +60,12 @@ def get_dataframe_from_file(filename, contents, date=None, expire_days=(2 * (365
     return (fileid, filename)
 
 def get_dataframe_from_url(url):
+    print('url', url)
+
     # 1. Work out the file id
     headers = fetch_reg_file(url, 'HEAD')
+
+    print('file header', headers)
 
     # 2. Get the registry entry for the file (if available)
     registry = get_reg_file_from_url(url)
@@ -73,11 +78,15 @@ def get_dataframe_from_url(url):
 
         fileid = get_fileid(None, url, last_modified)
 
+    print('file id', fileid)
+    
     # 2. Check cache for file
     df = get_from_cache(fileid)
     if df is not None:
         print("using cache")
         return (fileid, url, headers)
+
+    print(df.head())
 
     # 3. Fetch and prepare the data
     df = None
@@ -394,7 +403,63 @@ class LookupBelgianDetails(DataPreparationStage):
 
     name = 'Look up Belgian company data'
     cache_name = 'be_company'
+    base_url = 'https://data.be/fr/company/official/BE_{}/social'
+    second_url = 'https://www.socialsecurity.be/app014/wrep/rep/gp/jsp/fr/REPGPdata.jsp'
+    regex = re.compile('<td .+>Code importance:</td>[\n\t]*<td .+>([^<]+)</td>')
+    regex_name = re.compile('<td .+>D&eacute;nomination:</td>[\n\t]*<td .+>([^<]+)</td>')
 
+    def _find_nbr_employees(self, enterprise_number):
+        conn_sql3 = sqlite3.connect('kbo.sqlite3')
+        sql3 = conn_sql3.cursor() 
+        result = sql3.execute('SELECT Employees FROM employer_status WHERE EnterpriseNumber=?', (enterprise_number,)).fetchone()
+
+        if result is not None:
+            conn_sql3.close()
+            return result[0]
+        else:
+            headers = {
+                'User-agent': 'Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9.0.1) Gecko/2008071615 Fedora/3.0.1-1.fc9 Firefox/3.0.1', 
+                'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Cache-Control': 'no-cache'
+            }
+            s = requests.Session()
+            r = s.get(self.base_url.format(enterprise_number.replace('.', '')), headers=headers)
+            r2 = s.get(self.second_url, headers=headers, cookies=r.cookies)
+            print(r2.request.headers)
+
+            if r2.text.find('(201100) - L\'employeur demand&eacute; n\'existe ni dans le R&eacute;pertoire ONSS, ni dans celui de l\'ORPSS.') > -1:
+                print('{} not found in ONSS db'.format(enterprise_number))
+                nbr_employees = '0'
+            else:
+                name = self.regex_name.findall(r2.text)[0]
+                nbr_employees = self.regex.findall(r2.text)[0]
+                print('{} found with name {}'.format(enterprise_number, name))
+
+            sql3.execute('INSERT INTO employer_status(EnterpriseNumber, Employees) VALUES(?, ?)', (enterprise_number,nbr_employees))
+            conn_sql3.commit()
+            conn_sql3.close()
+            return nbr_employees
+    
+    def _get_kbo_data(self, enterprise_number):
+        try: 
+            conn_sql3 = sqlite3.connect('kbo.sqlite3')
+            sql3 = conn_sql3.cursor() 
+            result = sql3.execute('SELECT * FROM enterprise WHERE EnterpriseNumber=?', (enterprise_number,)).fetchone()
+            conn_sql3.close()
+            
+            '''
+            db_fields = ['EntityNumber', 'Status',  'JuridicalSituation', 'TypeOfEnterprise', 'JuridicalForm', 
+                'StartDate', 'TypeOfAddress', 'Zipcode', 'MunicipalityNL', 'MunicipalityFR', 'StreetNL', 'StreetFR', 'HouseNumber', 
+                'Box', 'municipality_nis_code', 'Denomination', 'OtherDenomination', 'assets', 'operatingIncome', 
+                'operatingCharges', 'averageFTE', 'averageFTEMen', 'averageFTEWomen']'''
+            db_fields = ['EnterpriseNumber', 'Status',  'JuridicalSituation', 'TypeOfEnterprise', 'JuridicalForm', 
+                'StartDate']
+            
+            result = dict(zip(db_fields, list(result)))
+        except TypeError:
+            print('Could not find company {}'.format(enterprise_number))
+        return result
+    
     def _get_company(self, orgid):
         if self.cache.hexists(self.cache_name, orgid):
             return json.loads(self.cache.hget(self.cache_name, orgid))
@@ -402,23 +467,9 @@ class LookupBelgianDetails(DataPreparationStage):
             db_orgid = orgid.replace("BE-BCE_KBO-", "")
             db_orgid = db_orgid[:4]+'.'+db_orgid[4:7]+'.'+db_orgid[7:]
             
-            try: 
-                conn_sql3 = sqlite3.connect('kbo.sqlite3')
-                sql3 = conn_sql3.cursor() 
-                result = sql3.execute('SELECT * FROM enterprise WHERE EnterpriseNumber=?', (db_orgid,)).fetchone()
-                conn_sql3.close()
-                
-                '''
-                db_fields = ['EntityNumber', 'Status',  'JuridicalSituation', 'TypeOfEnterprise', 'JuridicalForm', 
-                    'StartDate', 'TypeOfAddress', 'Zipcode', 'MunicipalityNL', 'MunicipalityFR', 'StreetNL', 'StreetFR', 'HouseNumber', 
-                    'Box', 'municipality_nis_code', 'Denomination', 'OtherDenomination', 'assets', 'operatingIncome', 
-                    'operatingCharges', 'averageFTE', 'averageFTEMen', 'averageFTEWomen']'''
-                db_fields = ['EnterpriseNumber', 'Status',  'JuridicalSituation', 'TypeOfEnterprise', 'JuridicalForm', 
-                    'StartDate']
-                
-                result = dict(zip(db_fields, list(result)))
-            except TypeError:
-                print('Could not find company {}'.format(db_orgid))
+            result = self._get_kbo_data(db_orgid)
+            if result is not None:
+                result['nbr_employees'] = self._find_nbr_employees(db_orgid)
             return result
 
     def run(self):

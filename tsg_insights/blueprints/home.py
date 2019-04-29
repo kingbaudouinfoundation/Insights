@@ -9,6 +9,7 @@ bp = Blueprint('home', __name__)
 
 @bp.route('/')
 def index():
+    print('config var', app.config.get("THREESIXTY_STATUS_JSON"))
     registry = process_registry(None, app.config.get("THREESIXTY_STATUS_JSON"))
     return render_template('index.html.j2', registry=registry)
 

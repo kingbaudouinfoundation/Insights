@@ -4,6 +4,8 @@ import requests
 import pandas as pd
 import requests_cache
 
+from flask import current_app
+
 from .cache import get_cache
 from .utils import format_currency, get_fileid
 
@@ -89,7 +91,7 @@ def get_reg_file_from_url(url):
 
 
 def fetch_reg_file(url, method='GET'):
-    print('fetching file header')
+    print('fetching file header', current_app.config.get("REDIS_URL"))
     user_agents = {
         "findthatcharity": 'FindThatCharity.uk',
         'spoof': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:63.0) Gecko/20100101 Firefox/63.0',

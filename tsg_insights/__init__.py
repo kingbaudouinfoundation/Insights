@@ -56,7 +56,7 @@ def create_app(test_config=None):
         app.config.from_mapping(test_config)
 
     # set the redis URL
-    print('redis url', app.config["REDIS_URL"])
+    print('redis url', os.environ.get("REDIS_URL"))
     app.config["REDIS_URL"] = os.environ.get(
         app.config["REDIS_ENV_VAR"],
         app.config["REDIS_DEFAULT_URL"]

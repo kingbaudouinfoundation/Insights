@@ -417,6 +417,7 @@ class LookupBelgianDetails(DataPreparationStage):
             conn_sql3.close()
             return result[0]
         else:
+            ''' fetching is not yet working, should have full db'''
             headers = {
                 'User-agent': 'Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9.0.1) Gecko/2008071615 Fedora/3.0.1-1.fc9 Firefox/3.0.1', 
                 'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -435,7 +436,7 @@ class LookupBelgianDetails(DataPreparationStage):
                 nbr_employees = self.regex.findall(r2.text)[0]
                 print('{} found with name {}'.format(enterprise_number, name))
 
-            sql3.execute('INSERT INTO employer_status(EnterpriseNumber, Employees) VALUES(?, ?)', (enterprise_number,nbr_employees))
+            #sql3.execute('INSERT INTO employer_status(EnterpriseNumber, Employees) VALUES(?, ?)', (enterprise_number,nbr_employees))
             conn_sql3.commit()
             conn_sql3.close()
             return nbr_employees

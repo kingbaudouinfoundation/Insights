@@ -91,29 +91,21 @@ def get_reg_file_from_url(url):
 
 
 def fetch_reg_file(url, method='GET'):
-    print('fetching file header', current_app.config.get("REDIS_URL"))
     user_agents = {
         "findthatcharity": 'FindThatCharity.uk',
         'spoof': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:63.0) Gecko/20100101 Firefox/63.0',
     }
-    print('fetching file header 2')
     if method not in ["GET", "HEAD"]:
         raise ValueError("Request method [{}] not recognised".format(method))
-    print('fetching file header 3')
     reg_file = requests.request(
         method, url, headers={'User-Agent': user_agents['findthatcharity']})
-    print('fetching file header 4')
     try:
         reg_file.raise_for_status()
-        print('fetching file header 5')
     except:
-        print('fetching file header 6')
         reg_file = requests.request(
             method, url, headers={'User-Agent': user_agents['spoof']})
-        print('fetching file header 7')
         reg_file.raise_for_status()
     if method=="HEAD":
-        print('returning file header')
         return reg_file.headers
     return reg_file.content
 

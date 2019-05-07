@@ -60,12 +60,9 @@ def get_dataframe_from_file(filename, contents, date=None, expire_days=(2 * (365
     return (fileid, filename)
 
 def get_dataframe_from_url(url):
-    print('url', url)
 
     # 1. Work out the file id
     headers = fetch_reg_file(url, 'HEAD')
-
-    print('file header', headers)
 
     # 2. Get the registry entry for the file (if available)
     registry = get_reg_file_from_url(url)
@@ -77,16 +74,12 @@ def get_dataframe_from_url(url):
         last_modified = headers.get("ETag", headers.get("Last-Modified"))
 
         fileid = get_fileid(None, url, last_modified)
-
-    print('file id', fileid)
     
     # 2. Check cache for file
     df = get_from_cache(fileid)
     if df is not None:
         print("using cache")
         return (fileid, url, headers)
-
-    print(df.head())
 
     # 3. Fetch and prepare the data
     df = None

@@ -95,7 +95,7 @@ def create_app(test_config=None):
         if app.config["REQUESTS_CACHE_ON"]:
             one_week_in_seconds = 60*60*24*7
             requests_cache.install_cache(
-                backend='redis',
+                backend='sqlite',
                 location=os.path.join(app.config["UPLOADS_FOLDER"], "http_cache"),
                 expire_after=one_week_in_seconds,
                 allowable_methods=('GET', 'HEAD',),

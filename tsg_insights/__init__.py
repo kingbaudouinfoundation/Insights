@@ -20,7 +20,7 @@ def create_app(test_config=None):
             os.path.join(os.getcwd(), "uploads")
         ),
         JSON_SORT_KEYS=False,
-        REQUESTS_CACHE_ON=True,
+        REQUESTS_CACHE_ON=False,
         FILE_CACHE=os.environ.get("FILE_CACHE", 'filesystem'), # use 'redis' or 'filesystem'
 
         # Newsletter
@@ -95,7 +95,7 @@ def create_app(test_config=None):
         if app.config["REQUESTS_CACHE_ON"]:
             one_week_in_seconds = 60*60*24*7
             requests_cache.install_cache(
-                backend='sqlite',
+                backend='redis',
                 location=os.path.join(app.config["UPLOADS_FOLDER"], "http_cache"),
                 expire_after=one_week_in_seconds,
                 allowable_methods=('GET', 'HEAD',),

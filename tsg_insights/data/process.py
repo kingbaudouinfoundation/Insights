@@ -15,7 +15,7 @@ from rq import get_current_job
 import tqdm
 from threesixty import ThreeSixtyGiving
 
-from .cache import get_cache, get_from_cache, save_to_cache
+from .cache import get_cache, get_from_cache, save_to_cache, get_db_connection
 from .utils import get_fileid, charity_number_to_org_id
 from .registry import fetch_reg_file, get_reg_file_from_url
 
@@ -402,7 +402,7 @@ class LookupBelgianDetails(DataPreparationStage):
     regex_name = re.compile('<td .+>D&eacute;nomination:</td>[\n\t]*<td .+>([^<]+)</td>')
 
     def _find_nbr_employees(self, enterprise_number):
-        conn_sql3 = sqlite3.connect('kbo.sqlite3')
+        conn_sql3 = get_db_connection()
         sql3 = conn_sql3.cursor() 
         result = sql3.execute('SELECT Employees FROM employer_status WHERE EnterpriseNumber=?', (enterprise_number,)).fetchone()
 
@@ -436,7 +436,7 @@ class LookupBelgianDetails(DataPreparationStage):
     
     def _get_kbo_data(self, enterprise_number):
         try: 
-            conn_sql3 = sqlite3.connect('kbo.sqlite3')
+            conn_sql3 = get_db_connection()
             sql3 = conn_sql3.cursor() 
             result = sql3.execute('SELECT * FROM enterprise WHERE EnterpriseNumber=?', (enterprise_number,)).fetchone()
             conn_sql3.close()
@@ -651,7 +651,7 @@ class FetchPostcodes(DataPreparationStage):
     pc_url = PC_URL
 
     def _normalise_country_name(self):
-        conn_sql3 = sqlite3.connect('kbo.sqlite3')
+        conn_sql3 = get_db_connection()
         sql3 = conn_sql3.cursor()
         country_dict = {}
         for row in sql3.execute('SELECT CountryName, ISO2, ISO3 FROM country_code'):
@@ -682,7 +682,7 @@ class FetchPostcodes(DataPreparationStage):
             elif pc['Recipient Org:0:Country'] == 'be':
 
                 try: 
-                    conn_sql3 = sqlite3.connect('kbo.sqlite3')
+                    conn_sql3 = get_db_connection()
                     sql3 = conn_sql3.cursor() 
                     result = sql3.execute('SELECT postcode, city, long, lat, province FROM postcode_geo WHERE postcode=?', (pc['Recipient Org:0:Postal Code'],)).fetchone()
                     conn_sql3.close()

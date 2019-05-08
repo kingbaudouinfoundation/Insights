@@ -19,6 +19,10 @@ def create_app(test_config=None):
             "UPLOADS_FOLDER",
             os.path.join(os.getcwd(), "uploads")
         ),
+        DB_FOLDER=os.environ.get(
+            "DB_FOLDER",
+            os.path.join(os.getcwd(), "db")
+        ),
         JSON_SORT_KEYS=False,
         REQUESTS_CACHE_ON=False,
         FILE_CACHE=os.environ.get("FILE_CACHE", 'filesystem'), # use 'redis' or 'filesystem'

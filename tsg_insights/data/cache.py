@@ -11,6 +11,8 @@ from .utils import CustomJSONEncoder
 REDIS_DEFAULT_URL = 'redis://localhost:6379/0'
 REDIS_ENV_VAR = 'REDIS_URL'
 
+def get_db_connection():
+    return sqlite3.connect(current_app.config.get("DB_FOLDER") + 'kbo.sqlite3')
 
 def get_cache(strict=False):
     redis_url = current_app.config.get("REDIS_URL")

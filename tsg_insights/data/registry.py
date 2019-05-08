@@ -4,8 +4,6 @@ import requests
 import pandas as pd
 import requests_cache
 
-from flask import current_app
-
 from .cache import get_cache
 from .utils import format_currency, get_fileid
 

@@ -667,7 +667,7 @@ class FetchPostcodes(DataPreparationStage):
         country_dict['northern ireland'] = 'gb'
 
         if 'Recipient Org:0:Country' in self.df.columns:
-            self.df['Recipient Org:0:Country'] = self.df['Recipient Org:0:Country'].apply(lambda x : country_dict[x.lower()] if x.lower() in country_dict else x.lower())
+            self.df['Recipient Org:0:Country'] = self.df['Recipient Org:0:Country'].apply(lambda x : country_dict[str(x).lower()] if str(x).lower() in country_dict else str(x).lower())
         else:
             self.df['Recipient Org:0:Country'] = 'gb'
 

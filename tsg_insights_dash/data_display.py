@@ -174,7 +174,7 @@ def dashboard_output(fileid, *args):
     
     charts.append(funder_chart(df))
     charts.append(amount_awarded_chart(df))
-    charts.append(grant_programme_chart(df))
+    #charts.append(grant_programme_chart(df))
     charts.append(awards_over_time_chart(df))
     charts.append(organisation_type_chart(df))
     # charts.append(org_identifier_chart(df))

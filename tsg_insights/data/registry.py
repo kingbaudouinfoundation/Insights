@@ -7,7 +7,8 @@ import requests_cache
 from .cache import get_cache
 from .utils import format_currency, get_fileid
 
-THREESIXTY_STATUS_JSON = 'https://storage.googleapis.com/datagetter-360giving-output/branch/master/status.json'
+#THREESIXTY_STATUS_JSON = 'https://storage.googleapis.com/datagetter-360giving-output/branch/master/status.json'
+THREESIXTY_STATUS_JSON = 'https://firebasestorage.googleapis.com/v0/b/kbf-org-data.appspot.com/o/status.json?alt=media&token=21219633-2437-4c57-8d13-24abd8e6d8b0'
 DEFAULT_CACHE = 60*60*24
 REG_KEY = "threesixty_status"
 
